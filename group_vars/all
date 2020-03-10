@@ -1,0 +1,10 @@
+#stack
+instance_type: t2.micro
+keypair: linux_academy
+image: ami-0a887e401f7654935
+assign_public_ip: yes
+vpc_subnet_id: subnet-64d3794b
+group_id: sg-0aeee606b80947fee
+java_version: java-1.8.0-openjdk
+http_port: 8080
+https_port: 8443

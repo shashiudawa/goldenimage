@@ -1,0 +1,163 @@
+---
+#Create the EC2 instance with base image and add to inventory
+- hosts: localhost
+  gather_facts: no
+  vars_files:
+   - /home/ansible/keys.yml
+  tasks:
+    - name: Provsion Instance
+      ec2:
+        aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+        aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+        ec2_region: "{{ AWS_REGION }}"
+        instance_type: "{{ instance_type }}"
+        keypair: "{{ keypair }}"
+        image: "{{ image }}"
+        assign_public_ip: "{{ assign_public_ip }}"
+        vpc_subnet_id: "{{ vpc_subnet_id }}"
+        group_id: "{{ group_id }}"
+        wait: true
+        exact_count: 1
+        count_tag: 
+          Name: "{{ tag_name }}_{{ role }}"
+        instance_tags:
+          Name: "{{ tag_name }}_{{ role }}"
+      register: ec2 
+    - debug:
+        var: ec2
+
+    - name: add host to inventory
+      add_host: 
+        hostname: "{{ item.public_ip }}"
+        groupname: "{{ patch_cycle }}_{{ role }}"
+        #groupname: test
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no"
+        ansible_ssh_private_key_file: "/home/ansible/.ssh/{{ keypair }}.pem"
+      loop: "{{ ec2.instances }}"
+
+#Install the application configuration to base instance. 
+- hosts: "{{ patch_cycle }}_{{ role }}"
+  gather_facts: no
+  remote_user: ec2-user
+  tasks:
+    - name: Wait for SSH
+      wait_for_connection:
+        delay: 5
+        timeout: 90
+
+    - name: Check host status
+      ping:
+  
+    - name: Install JDK
+      yum:
+        name: "{{ java_version }}"
+        state: present
+      become: true
+      tags:
+      - jdk
+
+- hosts: "{{ patch_cycle }}_{{ role }}"
+  gather_facts: yes
+  remote_user: ec2-user
+  become: true
+  vars_files:
+    - /home/ansible/keys.yml
+  roles:
+    - "{{ role }}"
+  tasks:
+    - name: Install boto3
+      yum:
+        name:
+          - python
+          - python-devel
+          - python-pip 
+          - python-boto3
+        state: present
+   
+    - name: boto
+      pip:
+        name: boto
+        state: present
+
+#    - name: Get instances
+#      ec2_instance_info:
+#        aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+#        aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+#        ec2_region: "{{ AWS_REGION }}"
+#        filters:
+#          tag:Name: "{{ tag_name }}_{{ role }}"
+#      register: ec2_facts
+#    - debug:
+#        var: ec2_facts.instances[0].instance_id
+
+ #   - name: Collect instance facts
+  #    ec2_metadata_facts:
+
+#Create the AMI
+- hosts: localhost
+  gather_facts: yes
+  vars_files:
+    - /home/ansible/keys.yml
+  tasks:
+    - name: Get instances
+      ec2_instance_info:
+        aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+        aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+        ec2_region: "{{ AWS_REGION }}"
+        filters:
+          tag:Name: "{{ tag_name }}_{{ role }}"
+      register: ec2_facts
+    - debug:
+        var: ec2_facts.instances[0].instance_id
+
+    - name: Stop the instance prior to take the sanpshot
+      ec2:
+        aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+        aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+        ec2_region: "{{ AWS_REGION }}"
+        instance_id: "{{ ec2_facts.instances[0].instance_id }}" 
+        #instance_id: "{{ hostvars[groups['{{ patch_cycle}}_{{ role }}'][0]]['ansible_ec2_instance_id'] }}"
+        #instance_tags: "{{ tag_name }}_{{ role }}"
+        state: stopped
+        wait: yes
+
+    - name: INFRASTRUCTURE ADD SNAPSHOT | Create snapshot on volume 
+      ec2_snapshot:
+        aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+        aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+        ec2_region: "{{ AWS_REGION }}"
+        instance_id: "{{ ec2_facts.instances[0].instance_id }}"
+        device_name: /dev/xvda
+        description: snapshot of test
+        snapshot_tags:
+          Name: "{{ tag_name }}_{{ role }}"
+          id_instance: "{{ ec2_facts.instances[0].instance_id }}"
+          volume: "/dev/xvda"
+
+#    - name: Get AMI facts
+#      ec2_ami_info:
+#        aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+#        aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+#        ec2_region: "{{ AWS_REGION }}"
+#        filters:
+#          tag: 
+#      register: ami_facts
+
+#    - name: Output information
+#      debug:
+#        msg: "{{ item.tag }}"
+#      loop_control:
+#        label: "{{ item.image_id }}"
+#      loop: "{{ ami_facts.images }}"
+        
+    - name: Create new AMI
+      ec2_ami:
+        aws_access_key: "{{ AWS_ACCESS_KEY_ID }}"
+        aws_secret_key: "{{ AWS_SECRET_ACCESS_KEY }}"
+        ec2_region: "{{ AWS_REGION }}"
+        instance_id: "{{ ec2_facts.instances[0].instance_id }}"
+        #image_id: "{{ item.image_id }}"
+        name: "{{ tag_name }}_{{ role }}"
+        state: present
+        tags:
+          Name: "{{ tag_name }}_{{ role }}"

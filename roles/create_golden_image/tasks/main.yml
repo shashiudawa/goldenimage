@@ -1,0 +1,9 @@
+- name: INFRASTRUCTURE ADD SNAPSHOT | Create snapshot on volume
+  ec2_snapshot:
+    instance_id: "{{ ec2_instances.instances.0.id }}"
+    device_name: "{{ add_volume_device_name }}"
+    snapshot_tags:
+        Name: "{{ name }}"
+        id_instance: "{{ ec2_instances.instances.0.id }}"
+        volume: "{{ add_volume_device_name }}"
+  when: add_snapshot == "true"
